@@ -26,6 +26,8 @@ class BatchMemcpyParams(NamedTuple):
     bpb: np.ndarray  # [num_sub_tensors] int64 — bytes per block
     num_sub_tensors: int
     direction: int  # DIRECTION_H2D or DIRECTION_D2H
+    src_num_blocks: int
+    dst_num_blocks: int
 
 
 def _ordered_tensors(caches: dict[str, torch.Tensor]) -> list[torch.Tensor]:
@@ -65,6 +67,8 @@ def build_params(
         bpb=np.array(bpb, dtype=np.int64),
         num_sub_tensors=len(src_tensors),
         direction=direction,
+        src_num_blocks=min(t.shape[0] for t in src_tensors),
+        dst_num_blocks=min(t.shape[0] for t in dst_tensors),
     )
 
 
@@ -85,6 +89,14 @@ def copy_blocks(
 
     src_ids = np.asarray(src_block_ids, dtype=np.int64)
     dst_ids = np.asarray(dst_block_ids, dtype=np.int64)
+    if (src_ids < 0).any() or (src_ids >= params.src_num_blocks).any():
+        raise ValueError(
+            f"NPU offload source block outside [0,{params.src_num_blocks}): {src_ids.min()}..{src_ids.max()}"
+        )
+    if (dst_ids < 0).any() or (dst_ids >= params.dst_num_blocks).any():
+        raise ValueError(
+            f"NPU offload destination block outside [0,{params.dst_num_blocks}): {dst_ids.min()}..{dst_ids.max()}"
+        )
 
     # Layout: (num_sub_tensors, n) flattened — contract of swap_blocks_batch.
     bpb_col = params.bpb[:, None]

@@ -110,6 +110,44 @@ def test_copy_blocks_empty_batch_issues_nothing(
     assert stream.sync_count == 0
 
 
+def test_build_params_records_block_counts_of_each_side() -> None:
+    npu_caches, cpu_caches = _caches(num_blocks=8, block_bytes=16)
+    cpu_caches["layer.1"] = torch.zeros(5, 16, dtype=torch.uint8)
+    params = build_params(npu_caches, cpu_caches, DIRECTION_H2D)
+
+    assert params.src_num_blocks == 8
+    assert params.dst_num_blocks == 5
+
+
+@pytest.mark.parametrize(
+    ("src_blocks", "dst_blocks", "message"),
+    [
+        ([-1], [0], "source block outside"),
+        ([8], [0], "source block outside"),
+        ([0], [-1], "destination block outside"),
+        ([0], [5], "destination block outside"),
+    ],
+)
+def test_copy_blocks_rejects_ids_outside_the_registered_pools(
+    dma: tuple[FakeStream, FakeSwapBlocksBatch],
+    src_blocks: list[int],
+    dst_blocks: list[int],
+    message: str,
+) -> None:
+    stream, swap = dma
+    npu_caches, cpu_caches = _caches(num_blocks=8, block_bytes=16)
+    cpu_caches["layer.1"] = torch.zeros(5, 16, dtype=torch.uint8)
+    params = build_params(npu_caches, cpu_caches, DIRECTION_H2D)
+
+    with pytest.raises(ValueError, match=message):
+        copy_blocks(src_blocks, dst_blocks, params)
+
+    # An out-of-range id must never reach the DMA, and nothing was queued for
+    # this call either.
+    assert swap.calls == []
+    assert stream.sync_count == 0
+
+
 def test_build_params_records_direction_and_per_block_bytes() -> None:
     npu_caches, cpu_caches = _caches(num_blocks=8, block_bytes=16)
     params = build_params(cpu_caches, npu_caches, DIRECTION_D2H)
