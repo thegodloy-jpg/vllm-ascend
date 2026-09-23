@@ -97,3 +97,8 @@ def copy_blocks(
     batch_sizes = torch.from_numpy(sz_all)
 
     torch.ops._C_ascend.swap_blocks_batch(batch_src, batch_dst, batch_sizes, params.direction)
+    # swap_blocks_batch only queues the copies: aclrtMemcpyBatchAsync reads the
+    # descriptor arrays above while the transfer runs, so they must outlive this
+    # frame. Without waiting, they are freed as soon as copy_blocks returns and
+    # the DMA reads recycled host memory.
+    torch.npu.current_stream().synchronize()
